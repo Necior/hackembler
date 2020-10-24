@@ -1,11 +1,51 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict, Union
 
 
 def bin_without_prefix(n: int, bits: int) -> str:
     b = bin(n)[2:]  # strip leading `0b`
     padding = "0" * (bits - len(b))
     return padding + b
+
+
+class SymbolTable:
+    def __init__(self):
+        self.last_variable_address = 0x000F
+        self.label2address: Dict[str, int] = {
+            "SP": 0x0000,
+            "LCL": 0x0001,
+            "ARG": 0x0002,
+            "THIS": 0x0003,
+            "THAT": 0x0004,
+            "R0": 0x0000,
+            "R1": 0x0001,
+            "R2": 0x0002,
+            "R3": 0x0003,
+            "R4": 0x0004,
+            "R5": 0x0005,
+            "R6": 0x0006,
+            "R7": 0x0007,
+            "R8": 0x0008,
+            "R9": 0x0009,
+            "R10": 0x000A,
+            "R11": 0x000B,
+            "R12": 0x000C,
+            "R13": 0x000D,
+            "R14": 0x000E,
+            "R15": 0x000F,
+            "SCREEN": 0x4000,
+            "KBD": 0x6000,
+        }
+
+    def add(self, label: str, address: int) -> None:
+        self.label2address[label] = address
+
+    def get(self, label: str) -> Optional[int]:
+        return self.label2address.get(label)
+
+    def create_variable(self) -> int:
+        self.last_variable_address += 1
+        return self.last_variable_address
 
 
 class AssemblyCommand:
@@ -16,14 +56,26 @@ class AssemblyCommand:
 
 @dataclass(frozen=True)
 class AInstruction(AssemblyCommand):
-    value: int
+    value_xor_label: Union[int, str]
 
     @staticmethod
     def from_line(line: str) -> "AInstruction":
-        return AInstruction(int(line[1:]))
+        if line[1].isdigit():
+            arg = int(line[1:])
+        else:
+            arg = line[1:]
+        return AInstruction(arg)
 
-    def gen_code(self) -> str:
-        result = bin_without_prefix(self.value, 16)
+    def gen_code(self, symbol_table: SymbolTable) -> str:
+        if isinstance(self.value_xor_label, int):
+            result = bin_without_prefix(self.value_xor_label, 16)
+        if isinstance(self.value_xor_label, str):
+            address = symbol_table.get(self.value_xor_label)
+            if address is None:
+                # create a new variable
+                address = symbol_table.create_variable()
+                symbol_table.add(self.value_xor_label, address)
+            result = bin_without_prefix(address, 16)
         assert len(result) == 16
         return result
 
@@ -114,9 +166,12 @@ class CInstruction(AssemblyCommand):
 
 @dataclass(frozen=True)
 class Label(AssemblyCommand):
+    label: str
+
     @staticmethod
     def from_line(line: str) -> "Label":
-        raise NotImplementedError("todo")
+        label = line[1:-1]  # strip `"("` and `")"` from `"(LABEL)"`
+        return Label(label)
 
 
 class Assembler:
@@ -149,12 +204,28 @@ def main() -> None:
         sys.stderr.write("Usage: ./main.py SOURCE.asm")
         sys.exit(1)
     path = sys.argv[1]
+    commands = []
+    symbol_table = SymbolTable()
+    next_instruction_address = 0x0000
     with open(path, "r") as f:
         for line in f:
             command = Assembler.parse_line(line)
             if command:
-                if isinstance(command, (AInstruction, CInstruction)):
-                    print(command.gen_code())
+                if isinstance(command, Label):
+                    symbol_table.add(command.label, next_instruction_address)
+                else:
+                    commands.append(command)
+                    next_instruction_address += 1
+    with open(path[:-3] + "hack", "w") as f:
+        for command in commands:
+            if isinstance(command, AInstruction):
+                f.write(command.gen_code(symbol_table))
+                f.write("\n")
+            elif isinstance(command, CInstruction):
+                f.write(command.gen_code())
+                f.write("\n")
+            else:
+                raise NotImplementedError("should never happen")
 
 
 if __name__ == "__main__":
