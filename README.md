@@ -49,7 +49,7 @@ M=0
   0;JMP
 ```
 
-The above program is translated to the following 20 16-bit instructions:
+The above program is translated to the following twenty 16-bit instructions:
 
 ```
 0000000000000000
